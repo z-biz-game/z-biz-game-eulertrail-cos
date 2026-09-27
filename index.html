@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#12151b">
+<meta name="description" content="一笔 · EULERTRAIL：在格点上描出所有边，边不能重复。每一关的笔数上限都是欧拉定理算出来的，并且由构造和穷举双向复核。">
+<link rel="icon" href="data:,">
+<title>一笔 · EULERTRAIL</title>
+<link rel="stylesheet" href="css/game.css">
+</head>
+<body>
+<header class="topbar">
+  <h1 class="brand"><span class="brand-mark">✎</span>一笔<small>EULERTRAIL</small></h1>
+  <nav class="modes" id="modes" aria-label="模式">
+    <button type="button" data-mode="campaign">战役</button>
+    <button type="button" data-mode="daily">每日</button>
+    <button type="button" data-mode="random">随机</button>
+  </nav>
+  <p class="totals" id="totals"></p>
+</header>
+
+<main class="stage">
+  <section class="board">
+    <canvas id="board" aria-label="格点路线图"></canvas>
+    <p class="hint-line" id="hintline"></p>
+    <div class="curtain" id="curtain" hidden>
+      <div class="curtain-card">
+        <p class="stars" id="stars"></p>
+        <h2 id="verdict"></h2>
+        <p class="tally" id="tally"></p>
+        <div class="curtain-actions">
+          <button type="button" id="again">再来一次</button>
+          <button type="button" id="next" class="primary">下一关</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <p class="crumbs" id="crumbs"></p>
+    <dl class="readout" id="readout"></dl>
+    <div class="controls">
+      <button type="button" id="undo">撤销</button>
+      <button type="button" id="hint">提示</button>
+      <button type="button" id="restart">重置</button>
+      <button type="button" id="share">分享</button>
+    </div>
+    <div class="shelf" id="shelf"></div>
+    <details class="about">
+      <summary>这一关的笔数从哪来</summary>
+      <p>一个连通图的边，最少能拆成 <code>max(1, 奇点数 / 2)</code> 条互不重复的迹（trail）。这个数既是下限也是上限，所以屏幕上写的笔数不是估值。关卡由 <code>tools/bake.mjs</code> 在构建期生成：同一关要同时被定理、构造（<code>js/core/construct.js</code> 的欧拉回路加切割）和 ≤14 条边的穷举 DP 三遍认可才会进包，浏览器不做生成。</p>
+      <p>拖过已经画过的边没有效果——不重复计数、不算失败、也不报错，只是什么都没发生。抬笔随时可以抬，下一笔立刻能开始。</p>
+      <p>七桥问题：柯尼斯堡的 Kneiphof 岛度数为 5，而格点最多只有 4 个邻居，所以那张图<b>不可能</b>精确嵌入平面格点。这里用的是同一定理的 4 奇点实例——一个 5 条边、4 个奇点、必须 2 笔的格点图，它和七桥的推理完全同形，但它不是七桥。见 <code>test/theory.test.mjs</code>。</p>
+      <p class="save">成绩只存在这台设备的浏览器里。<button type="button" id="wipe">清空存档</button></p>
+    </details>
+  </aside>
+</main>
+
+<p class="toast" id="toast" hidden></p>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

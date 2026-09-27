@@ -1,0 +1,38 @@
+{
+  "name": "eulertrail",
+  "version": "1.0.0",
+  "description": "一笔 EULERTRAIL — 浏览器原生一笔画. 每关笔数上限由欧拉定理算出, 并由构造与穷举 DP 双向复核; 关卡在构建期生成并复验.",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "dev": "node server.cjs 5190",
+    "electron": "electron .",
+    "bake": "node tools/bake.mjs",
+    "balance": "node test/balance.mjs",
+    "check": "for f in js/*.js js/*/*.js server.cjs electron/main.cjs tools/*.mjs test/*.mjs; do node --check \"$f\" || exit 1; done && echo OK",
+    "unit": "for f in test/*.test.mjs; do node \"$f\" || exit 1; done",
+    "test": "npm run check && npm run unit",
+    "verify": "bash tools/verify.sh"
+  },
+  "keywords": [
+    "game",
+    "puzzle",
+    "one-stroke",
+    "euler-path",
+    "graph-theory",
+    "procedural",
+    "electron"
+  ],
+  "author": "z-biz-game",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {},
+  "build": {
+    "appId": "com.zbiz.eulertrail",
+    "productName": "Eulertrail",
+    "mac": { "category": "public.app-category.puzzle-games" },
+    "win": { "target": "nsis" },
+    "linux": { "target": "AppImage" }
+  }
+}
