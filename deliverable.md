@@ -203,3 +203,31 @@ browser job 用 `SKIP_UNIT=1` + `WD_TIMEOUT: 240` 跑 `bash tools/verify.sh`。
 - **命名口径与派单文本不一致（照规格执行，此处声明）**：派单给的 README 首行样例是 `# 一笔画径 · EULERTRAIL`，
   但同一份派单写明"如果规格里另有中文名，以规格为准"，而 `eulertrail.md` 的中文名是「一笔」。
   本报告与 README 都用「一笔」，两处完全一致（审计的 `name match` 判据即取这两处比对）。
+
+## 线上验收（GitHub Pages，主代理 2026-09-27 实抓）
+
+发布 sha `4e656b1`，CI trigger `624aa99`；本地门禁由主代理自己的 `audit.sh` 复核：
+`npm run check` rc=0、node **96 条断言 / 0 失败**、浏览器 **65 条 / 0 失败**、zero-deps、0 个二进制资产、
+`core purity clean`、`unwired exports none`。
+
+| 资源 | 结果 |
+| --- | --- |
+| `/`（index.html） | 200 / 3,264 B |
+| `js/main.js` | 200 / 22,097 B |
+| `css/game.css` | 200 / 6,655 B |
+| `js/data/lots.js` | 200 / 24,954 B |
+| `<title>` | `一笔 · EULERTRAIL`，与 README 首行一致 |
+
+真实浏览器渲染（`https://z-biz-game.github.io/z-biz-game-eulertrail-cos/`，2026-09-27 09:53Z）：
+
+- canvas 后备缓冲 `1384x1130`，CSS 盒 `692x408`（devicePixelRatio 2 生效）；
+- `getImageData` 全量采样 1,563,920 个像素，其中 **1,152,644 个非近黑**（73.7%），出现 **143 种不同 RGB**
+  —— 图形与顶点和路径都真的画出来了；
+- `window.eulertrail` 暴露 **27 个键**（`version state pool theorem load vertexPoint edgeAt …`）——
+  其中 `theorem` 直接在线上是可查的：本仓库的"难度"来自欧拉迹存在性定理（奇度顶点数 ∈ {0,2}），
+  不是形容词；
+- 控制台 **0 条消息**（无 error / warning；`index.html` 用 `<link rel="icon" href="data:,">`，
+  浏览器不发 favicon 请求，故该断言未被 404 噪音污染）。
+
+诚实边界：以上是"结构 + 像素统计"级证据（在已发布页面里跑 `evaluate_script` 取 `getImageData`），
+不是逐帧视觉截图比对；本次未产出 PNG，仓库保持 0 个二进制资产。
