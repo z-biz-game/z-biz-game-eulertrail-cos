@@ -195,4 +195,56 @@ test('存档: a corrupt key is start-clean, not start-crash', () => {
   corruptStore.reset();
 });
 
+// Imported now, read later: the module only touches the backend on its first method call,
+// so the junk payload written inside the test is the first thing this copy ever decodes.
+const junkStore = (await import('../js/core/storage.js?junk')).store;
+
+test('存档 两段式解码: one bad record drops only that record', () => {
+  // 手写 JSON 字符串：对象字面量里的 `__proto__` 是换原型，不是加键，用它当样本正好。
+  ls.setItem(SAVE_KEY, [
+    '{',
+    '"version":1,',
+    '"unlocked":99999,',
+    '"records":{',
+    '"good":{"solved":true,"best":3,"par":3,"stars":2,"plays":4,"hints":1,"at":1700000000000},',
+    '"nullish":null,',
+    '"wrongtype":{"solved":"yes","best":3,"par":3,"stars":3},',
+    '"starstruck":{"solved":true,"best":3,"par":3,"stars":9},',
+    '"clampable":{"solved":true,"best":3,"par":3,"stars":1,"plays":"x","hints":-5,"at":7},',
+    '"__proto__":{"solved":true,"best":1,"par":1,"stars":3}',
+    '},',
+    '"daily":{"__proto__":{"id":"ghost"},"2026-09-28":{"id":"lot-d","at":1}},',
+    '"prefs":{"tutorialSeen":true,"sound":"no","volume":1.9,"__proto__":true},',
+    '"stats":{"wins":"many","plays":7,"losses":7000000000000}',
+    '}',
+  ].join(''));
+  eq(junkStore.record('good').best, 3, 'the readable record came through untouched');
+  eq(junkStore.record('good').solved, true, 'including its flags');
+  eq(junkStore.record('nullish'), null, 'a null record is dropped, not fatal');
+  eq(junkStore.record('wrongtype'), null, 'a non-boolean solved drops only that record');
+  eq(junkStore.record('starstruck'), null, 'and a stars outside {0..3} the same');
+  eq(junkStore.record('__proto__'), null, 'a __proto__ record key never enters the object');
+  eq(junkStore.record('clampable').plays, 0, 'an unparseable field falls back to its default');
+  eq(junkStore.record('clampable').hints, 0, 'including a negative count');
+  eq(junkStore.record('clampable').stars, 1, 'while the rest of that record survives');
+  eq(junkStore.dropped.records, 4, `four records were named: ${JSON.stringify(junkStore.dropped)}`);
+  eq(junkStore.dropped.stats, 1, 'the bad stats field is counted, not swallowed');
+  eq(junkStore.dropped.whole, 0, 'and the file as a whole was not thrown away');
+  eq(junkStore.stats.plays, 7, 'a good stats field still lands');
+  eq(junkStore.stats.losses, 1e9, 'an out-of-range one clamps to the ceiling');
+  eq(junkStore.stats.wins, 0, 'a string count falls back to zero');
+  eq(junkStore.dailyDone('2026-09-28').id, 'lot-d', 'the valid daily log survives');
+  eq(junkStore.dailyDone('constructor'), null, 'and an inherited member is not a finished daily');
+  eq(junkStore.prefs.tutorialSeen, true, 'a boolean pref survives');
+  eq(junkStore.prefs.volume, 1, 'a number pref truncates');
+  eq('sound' in junkStore.prefs, false, 'a string pref is dropped');
+  eq(Object.keys(junkStore.prefs).sort().join(','), 'tutorialSeen,volume', 'no unsafe pref key landed');
+  eq(junkStore.unlocked, 10000, 'unlocked clamps to the cap rather than resetting');
+  junkStore.finish('lot-e', { strokes: 2, par: 2, hints: 0, outcome: 'won' });
+  const rearmed = JSON.parse(ls.getItem(SAVE_KEY));
+  eq(rearmed.records['lot-e'].solved, true, 'the store is writable again, into the backend');
+  eq(rearmed.records.good.best, 3, 'and it did not lose the good record on the way out');
+  junkStore.reset();
+});
+
 run();
