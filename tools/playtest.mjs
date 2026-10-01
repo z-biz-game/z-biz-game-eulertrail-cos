@@ -207,11 +207,54 @@ async function pointerScenario(cdp, sessionId, runJS) {
     await dragThrough(pins[0], through);
   }
 
-  const ids = await runJS(`['board','undo','hint','restart','share','curtain','stars','verdict','tally','shelf','wipe','modes','readout','hintline','totals','crumbs','toast','next','again'].map((i) => [i, !!document.getElementById(i)])`);
+  const ids = await runJS(`['board','undo','hint','restart','share','curtain','stars','verdict','tally','shelf','wipe','modes','readout','hintline','totals','crumbs','toast','next','again','help','sound','pause','fullscreen','tutorial','tut-close','pauseveil'].map((i) => [i, !!document.getElementById(i)])`);
   rec('every control the shell reaches for exists', ids.every(([, on]) => on), Object.fromEntries(ids));
+
+  // 教学幕是真的一层幕：开着的时候一笔都画不了，仿真钟也不走；点"开始画"才解冻。
+  // 这段必须排在下面的拖拽之前——新 profile 上开局它就是开着的。
+  const sysIds = ids.filter(([i]) => ['help', 'sound', 'pause', 'fullscreen', 'tutorial', 'tut-close', 'pauseveil'].includes(i));
+  rec('系统面的控件都在 DOM 上', sysIds.every(([, on]) => on), Object.fromEntries(sysIds));
 
   await runJS(`window.eulertrail.load('#/lot/tandem-01'); 'ok'`);
   await sleep(250);
+
+  async function clickEl(id) {
+    const r = await runJS(`(() => { const e = document.getElementById(${JSON.stringify(id)});
+      if (!e || e.hidden || e.closest('[hidden]')) return null;
+      const b = e.getBoundingClientRect(); return b.width ? { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) } : null; })()`);
+    if (!r) return false;
+    await mouse('mousePressed', r.x, r.y, 1);
+    await mouse('mouseReleased', r.x, r.y, 0);
+    await sleep(140);
+    return true;
+  }
+
+  await clickEl('tut-close');                       // 新 profile 上开局幕就是开着的
+  const runA = await runJS(`window.eulertrail.state`);
+  await sleep(220);
+  const runB = await runJS(`window.eulertrail.state`);
+  rec('没幕没暂停时仿真钟自己在走', runA.frozen === false && runB.sim.simSteps > runA.sim.simSteps,
+    { simSteps: [runA.sim.simSteps, runB.sim.simSteps], frozen: runA.frozen });
+  await clickEl('help');
+  const veilOn = await runJS(`window.eulertrail.state`);
+  const mid = await runJS(`(() => { const r = document.getElementById('board').getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  await mouse('mousePressed', mid.x, mid.y, 1);
+  await mouse('mouseMoved', mid.x + 46, mid.y + 46, 1);
+  await mouse('mouseReleased', mid.x + 46, mid.y + 46, 0);
+  await sleep(220);
+  const veilAfter = await runJS(`window.eulertrail.state`);
+  rec('教学幕开着时，真鼠标一笔都改不了，仿真钟也不走', veilOn.tutorial === true && veilOn.frozen === true
+    && veilAfter.covered === veilOn.covered && veilAfter.strokes === veilOn.strokes
+    && veilAfter.sim.simSteps === veilOn.sim.simSteps,
+  { covered: [veilOn.covered, veilAfter.covered], strokes: [veilOn.strokes, veilAfter.strokes], simSteps: [veilOn.sim.simSteps, veilAfter.sim.simSteps] });
+  await clickEl('tut-close');
+  const veilOff = await runJS(`window.eulertrail.state`);
+  await sleep(220);
+  const unfrozen = await runJS(`window.eulertrail.state`);
+  rec('点"开始画"即解冻并继续推进', veilOff.tutorial === false && veilOff.frozen === false && veilOff.paused === false
+    && unfrozen.sim.simSteps > veilOff.sim.simSteps,
+  { tutorial: veilOff.tutorial, frozen: veilOff.frozen, simSteps: [veilOff.sim.simSteps, unfrozen.sim.simSteps] });
+
   const start = await runJS(`(() => { const g = window.eulertrail; return { state: g.state, theorem: g.theorem, baked: g.baked(), drawn: g.drawn() }; })()`);
   rec('a tandem lot loads through the real route', start.state.id === 'tandem-01' && start.state.par === 2 && start.baked.length === 2,
     { id: start.state.id, par: start.state.par, strokes: start.state.strokes });

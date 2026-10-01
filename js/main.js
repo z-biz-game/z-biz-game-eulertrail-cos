@@ -512,10 +512,10 @@ window.addEventListener('keydown', (ev) => {
   } else if (k === 'p') setPaused(!app.paused);
   else if (k === 'r') el.restart.click();
   else if (k === 'u') el.undo.click();
-  else if (k === 'g') el.hint.click();
+  else if (k === 'g' || k === 'h') el.hint.click();
   else if (k === 'm') toggleMute();
   else if (k === 'f') toggleFullscreen();
-  else if (k === 'h' || k === '?') setTutorial(el.tutorial.hidden);
+  else if (k === '?') setTutorial(el.tutorial.hidden);
   else taken = false;
   if (taken) ev.preventDefault();
 });
