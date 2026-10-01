@@ -14,6 +14,7 @@ import { oddCount, par as theoryPar } from './core/theory.js';
 import { coverWith } from './core/construct.js';
 import { minTrails, exhaustiveAllowed, MAX_EDGES as BRUTE_CAP } from './core/bruteforce.js';
 import { store } from './core/storage.js';
+import { audio } from './core/audio.js';
 import {
   TIERS, ALL, byId, levelAt, lotsIn, randomLot, dailyLot, tierByKey, stats as poolStats,
 } from './core/library.js';
@@ -28,6 +29,9 @@ const el = {
   verdict: $('verdict'), tally: $('tally'), undo: $('undo'), hint: $('hint'),
   restart: $('restart'), share: $('share'), next: $('next'), again: $('again'),
   toast: $('toast'), canvas: $('board'), wipe: $('wipe'),
+  help: $('help'), sound: $('sound'), pause: $('pause'), resume: $('resume'),
+  fullscreen: $('fullscreen'), tutorial: $('tutorial'), tutClose: $('tut-close'),
+  pauseveil: $('pauseveil'),
 };
 
 const LEVELS = ALL.length;
@@ -42,6 +46,8 @@ const app = {
   day: null,
   settled: false,   // finish() runs once per outcome, never once per event
   proof: null,      // { key, theorem, built, exhaustive } for the lot on screen
+  paused: false,    // 玩家按下去的暂停；为真时定步长累加器一帧都不推进
+  tutorial: false,  // 教学幕开着，同样冻住仿真（免得讲解背后那一局还在自己走）
 };
 
 function clampIndex(n) {
@@ -91,7 +97,13 @@ const view = createView(el.canvas, { onEvent: note });
 // a following-the-hint tap all arrive at the same rules, so @play and @pointer are not two
 // different games with one of them lying.
 function note(ev) {
-  if (!ev || !app.game) return;
+  if (!ev) return;
+  if (ev.type === 'paused') { say('已暂停 —— 按 <b>P</b> 或 <kbd>Space</kbd> 继续'); return; }
+  if (!app.game) return;
+  if (ev.type === 'step') audio.play('step');
+  else if (ev.type === 'lift' && ev.committed) audio.play('lift');
+  else if (ev.type === 'again') audio.play('again');
+  else if (ev.type === 'refused' || ev.type === 'blocked' || ev.type === 'miss') audio.play('refuse');
   if (ev.type === 'again') say('<span class="warn">这条边已经画过了 —— 再拖一次不会重复计数，也不算错</span>');
   else if (ev.type === 'refused') say('两点之间没有边 —— 笔只能沿着画得出的边走');
   else if (ev.type === 'miss') say('那里没有图钉');
@@ -253,6 +265,7 @@ function finish() {
     nextIndex = won && app.index < LEVELS ? app.index + 1 : 0;
   }
   const gr = grade(g);
+  audio.play(won ? 'win' : 'lose');
   el.stars.textContent = stars(gr.stars);
   el.verdict.textContent = gr.label;
   el.tally.innerHTML = won
@@ -349,6 +362,7 @@ el.hint.addEventListener('click', () => {
     return;
   }
   app.hints++;
+  audio.play('hint');
   view.showHint(h);
   if (h.kind === 'fresh') say(`提示：第 <b>${h.stroke}</b> 笔从标出的点起笔，沿高亮边画 —— 还差 <b>${h.left}</b> 笔`);
   else if (h.kind === 'diverged') say(`提示：${h.note} —— 这一笔剩下的边仍然要连着画完`);
@@ -361,8 +375,11 @@ function restart() {
   reset(app.game);
   app.hints = 0;
   app.settled = false;
+  app.paused = false;      // 重开等于继续玩：留着暂停幕的话，画面复位了但一帧都不走
   el.curtain.hidden = true;
   view.attach(app.game);   // also drops the in-progress drag and the hint pulse
+  applyFreeze();
+  audio.play('ui');
   render();
   say('回到起点');
 }
@@ -388,16 +405,126 @@ el.wipe.addEventListener('click', () => {
   apply();
 });
 
+// ---------------------------------------------------------------- 系统面
+// 静音 / 暂停 / 全屏 / 教学四件事放在一起，因为它们共享一条口径：**幕布落下时仿真必须
+// 真的停**。view.setPaused() 让定步长累加器一帧都不推进，audio.pause() 真的 suspend
+// AudioContext —— 只盖一层半透明 div 的那种"暂停"，墨水会自己走完，音效会穿幕而出。
+function syncSound() {
+  el.sound.setAttribute('aria-pressed', String(audio.muted));
+  el.sound.title = audio.muted ? '已静音（按 M 恢复）' : '静音开关（M）';
+  el.sound.setAttribute('aria-label', audio.muted ? '取消静音' : '静音');
+}
+
+function toggleMute() {
+  audio.toggle();
+  syncSound();
+  toast(audio.muted ? '已静音 · 音频上下文已挂起' : '已取消静音');
+  return audio.muted;
+}
+
+function frozen() { return app.paused || app.tutorial; }
+
+function applyFreeze() {
+  const f = frozen();
+  view.setPaused(f);
+  if (f) audio.pause();
+  else audio.unpause();
+  el.pauseveil.hidden = !app.paused;
+  el.pause.setAttribute('aria-pressed', String(app.paused));
+  el.pause.textContent = app.paused ? '▶' : '❙❙';
+  el.pause.setAttribute('aria-label', app.paused ? '继续' : '暂停');
+  el.pause.title = app.paused ? '继续（P）' : '暂停（P 或 Space）';
+}
+
+function setPaused(v) {
+  app.paused = !!v;
+  applyFreeze();
+  return app.paused;
+}
+
+function setTutorial(v) {
+  app.tutorial = !!v;
+  el.tutorial.hidden = !app.tutorial;
+  applyFreeze();
+  if (app.tutorial) store.setPref('tutorialSeen', true);
+  return app.tutorial;
+}
+
+function fullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+// 绑到 HUD 上真存在的 #fullscreen。iOS Safari 没有 Element Fullscreen API，这里必须
+// 如实告诉玩家"这个浏览器不给全屏"，而不是安静地什么都不发生。
+function toggleFullscreen() {
+  const d = document;
+  if (fullscreenElement()) {
+    const exit = d.exitFullscreen || d.webkitExitFullscreen;
+    if (exit) { const p = exit.call(d); if (p && p.catch) p.catch(() => {}); }
+    return false;
+  }
+  const root = d.documentElement;
+  const req = root.requestFullscreen || root.webkitRequestFullscreen || root.webkitRequestFullScreen;
+  if (!req) { toast('这个浏览器不支持全屏（iOS Safari 没有元素级 Fullscreen API）'); return false; }
+  const p = req.call(root);
+  if (p && p.catch) p.catch((err) => toast(`全屏被拒绝：${err && err.message ? err.message : '需要用户手势'}`));
+  return true;
+}
+
+function syncFullscreen() {
+  const on = !!fullscreenElement();
+  el.fullscreen.setAttribute('aria-pressed', String(on));
+  el.fullscreen.textContent = on ? '⛶̶' : '⛶';
+  el.fullscreen.title = on ? '退出全屏（F）' : '全屏（F）';
+  // 视口宽度变了，画布要重新量一次，否则精灵与格点会按旧尺寸画。
+  view.measure();
+  return on;
+}
+
+el.help.addEventListener('click', () => { audio.unlock(); audio.play('ui'); setTutorial(el.tutorial.hidden); });
+el.tutClose.addEventListener('click', () => { audio.unlock(); audio.play('ui'); setTutorial(false); el.canvas.focus(); });
+el.sound.addEventListener('click', () => { audio.unlock(); toggleMute(); });
+el.pause.addEventListener('click', () => { audio.unlock(); setPaused(!app.paused); });
+el.resume.addEventListener('click', () => setPaused(false));
+el.fullscreen.addEventListener('click', () => { audio.unlock(); toggleFullscreen(); });
+if (document.addEventListener) {
+  document.addEventListener('fullscreenchange', syncFullscreen);
+  document.addEventListener('webkitfullscreenchange', syncFullscreen);
+}
+
 window.addEventListener('hashchange', apply);
 window.addEventListener('resize', () => view.measure());
 window.addEventListener('keydown', (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-  const k = ev.key.toLowerCase();
-  if (k === 'escape' && !el.curtain.hidden) el.curtain.hidden = true;
-  else if (k === 'u') el.undo.click();
-  else if (k === 'h') el.hint.click();
+  const k = ev.key === ' ' ? 'space' : String(ev.key || '').toLowerCase();
+  // 焦点在按钮上时，Space/Enter 是"按下这个按钮"，浏览器已经替我们做了。
+  const tag = (ev.target && ev.target.tagName) || '';
+  if (tag === 'BUTTON' && (k === 'space' || k === 'enter')) return;
+  audio.unlock();                        // 键盘也是合法的用户手势，第一次出声可以在这里
+  let taken = true;
+  if (k === 'escape') {
+    if (app.tutorial) setTutorial(false);
+    else if (app.paused) setPaused(false);
+    else if (!el.curtain.hidden) el.curtain.hidden = true;
+  } else if (k === 'space' || k === 'enter') {
+    if (app.tutorial) setTutorial(false);          // 开始
+    else setPaused(!app.paused);                   // 没在开局就是暂停
+  } else if (k === 'p') setPaused(!app.paused);
   else if (k === 'r') el.restart.click();
+  else if (k === 'u') el.undo.click();
+  else if (k === 'g') el.hint.click();
+  else if (k === 'm') toggleMute();
+  else if (k === 'f') toggleFullscreen();
+  else if (k === 'h' || k === '?') setTutorial(el.tutorial.hidden);
+  else taken = false;
+  if (taken) ev.preventDefault();
 });
+
+audio.init();
+syncSound();
+// 第一次进来把玩法摊开：这个游戏的规则（边不可重复、笔数上限是定理）不读一遍是猜不出来的。
+if (!store.prefs.tutorialSeen) setTutorial(true);
+else applyFreeze();
 
 view.start();
 // Deliberately not paused on visibilitychange: the hint pulse is driven from the same loop,
@@ -425,12 +552,28 @@ const hook = {
       unlocked: store.unlocked,
       solved: Object.values(store.records).filter((r) => r.solved).length,
       curtain: !el.curtain.hidden,
+      paused: app.paused,
+      tutorial: app.tutorial,
+      frozen: frozen(),
+      muted: audio.muted,
+      soundNodes: audio.nodes,
+      soundSuppressed: audio.suppressed,
+      ctxState: audio.ctxState,
+      fullscreen: !!fullscreenElement(),
+      sim: view.simState(),
       rows: g ? g.g.rows : 0,
       cols: g ? g.g.cols : 0,
       hash: location.hash,
       route: linkFor(app.route),
     };
   },
+  // 系统面的四个口子，全部走和玩家点击完全相同的那条路径。
+  setPaused(v) { return setPaused(v === undefined ? !app.paused : v); },
+  toggleMute() { return toggleMute(); },
+  openTutorial(v) { return setTutorial(v === undefined ? true : !!v); },
+  toggleFullscreen() { return toggleFullscreen(); },
+  simState() { return view.simState(); },
+  audioState() { return audio.state(); },
   get pool() { return poolStats(); },
   get theorem() {
     const g = app.game;

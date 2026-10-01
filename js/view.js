@@ -25,6 +25,52 @@ const GRID = 'rgba(226, 232, 240, 0.06)';
 const PIN = '#8fa2bd';
 const PIN_HOT = '#f4f7fb';
 
+// 仓内位图（assets/gen/make_assets.py 生成）。母图和屏幕用同一套色令牌，所以
+// 图标、社交卡、棋盘是同一个东西，而不是三批互不相干的素材。
+const SPRITES = {
+  lattice: 'assets/img/lattice-tile.png',
+  pin: 'assets/img/pin-sprite.png',
+  pinDim: 'assets/img/pin-dim-sprite.png',
+  penGlow: 'assets/img/pen-glow.png',
+  hintGlow: 'assets/img/hint-glow.png',
+};
+
+// 定步长：动画只按 SIM_STEP 推进，帧 dt 只进累加器。这样 30/60/120Hz 下同一虚拟
+// 时长走到同一步，闪光与涟漪的寿命不再取决于刷新率。
+const SIM_STEP = 1 / 60;
+const FLASH_SECONDS = 0.32;      // "这条边画过了"的那一下
+const HINT_SECONDS = 2.6;        // 提示高亮的寿命
+const HINT_PERIOD = 0.9;         // 涟漪一圈
+
+function loadSprites() {
+  // 沙箱 / file:// / 缺图时 Image 可能根本没有真实解码能力：一律以 onload 为准，
+  // 没 ready 的精灵在绘制侧走矢量回落，绝不因为少一张图白屏。
+  const out = {};
+  for (const key of Object.keys(SPRITES)) {
+    out[key] = { img: null, ready: false };
+    try {
+      if (typeof Image !== 'function') continue;
+      const img = new Image();
+      img.addEventListener('load', () => { out[key].ready = true; });
+      img.addEventListener('error', () => { out[key].ready = false; });
+      img.decoding = 'async';
+      img.src = SPRITES[key];
+      out[key].img = img;
+    } catch (err) {
+      out[key] = { img: null, ready: false };
+    }
+  }
+  return out;
+}
+
+function reducedMotionQuery() {
+  try {
+    return globalThis.matchMedia ? globalThis.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  } catch (err) {
+    return null;
+  }
+}
+
 export function createView(canvas, { onEvent } = {}) {
   const ctx = canvas.getContext('2d');
   let game = null;
@@ -34,7 +80,19 @@ export function createView(canvas, { onEvent } = {}) {
   let raf = 0;
   let last = 0;
   let flash = 0;            // 0..1, the "that edge is already drawn" nudge
+  let flashSteps = 0;       // reduceMotion 分支：静图再存在多少个定步
   let flashEdge = -1;       // which edge got the nudge
+  let sprite = loadSprites();
+  let latticePattern = null;
+  let animClock = 0;        // 只由定步长推进的动画钟
+  let simAccumulator = 0;
+  let simSteps = 0;
+  let paused = false;
+  const rmq = reducedMotionQuery();
+  let reduceMotion = !!(rmq && rmq.matches);
+  if (rmq && rmq.addEventListener) {
+    rmq.addEventListener('change', (e) => { reduceMotion = !!e.matches; draw(); });
+  }
 
   function measure() {
     const box = canvas.getBoundingClientRect();
@@ -44,9 +102,22 @@ export function createView(canvas, { onEvent } = {}) {
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    latticePattern = sprite.lattice.ready && ctx.createPattern
+      ? ctx.createPattern(sprite.lattice.img, 'repeat')
+      : null;
     if (!game) return;
     gm = geomFor(W, H, game.g.rows, game.g.cols);
     draw();
+  }
+
+  // 精灵画到指定中心尺寸；没解码完就走调用方给的矢量回落，缺图永远不等于白屏。
+  function spriteAt(which, x, y, size, alpha) {
+    const s = sprite[which];
+    if (!s || !s.ready || !s.img || !s.img.naturalWidth) return false;
+    if (alpha !== undefined) ctx.globalAlpha = alpha;
+    ctx.drawImage(s.img, x - size / 2, y - size / 2, size, size);
+    if (alpha !== undefined) ctx.globalAlpha = 1;
+    return true;
   }
 
   function localPoint(ev) {
@@ -80,6 +151,7 @@ export function createView(canvas, { onEvent } = {}) {
 
   function down(ev) {
     if (!game || game.outcome === 'won') return;
+    if (paused) { report({ type: 'paused' }); return; }
     const p = localPoint(ev);
     const v = vertexAtLocal(game.g, gm, p.x, p.y, MIN_TOL);
     if (v < 0) {
@@ -127,7 +199,7 @@ export function createView(canvas, { onEvent } = {}) {
       const r = stepTo(game, v);
       asked++;
       if (!r.ok) {
-        if (r.reason === 'drawn') { flash = 1; flashEdge = r.edge; report({ type: 'again', edge: r.edge, vertex: v }); }
+        if (r.reason === 'drawn') { flash = 1; flashSteps = 12; flashEdge = r.edge; report({ type: 'again', edge: r.edge, vertex: v }); }
         else report({ type: 'refused', reason: r.reason, vertex: v });
         continue;
       }
@@ -196,6 +268,14 @@ export function createView(canvas, { onEvent } = {}) {
     ctx.fill();
 
     // Faint lattice so a pin's neighbour relation is visible even where there is no edge.
+    // 位图纹理到位就用它（母图和图标同一套），没到位回落成手绘格线。
+    if (latticePattern) {
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = latticePattern;
+      ctx.fillRect(ox - PAD * 0.3, oy - PAD * 0.3, w + PAD * 0.6, h + PAD * 0.6);
+      ctx.restore();
+    }
     ctx.strokeStyle = GRID;
     ctx.lineWidth = 1;
     for (let r = 0; r < g.rows; r++) {
@@ -229,11 +309,13 @@ export function createView(canvas, { onEvent } = {}) {
 
     // The already-drawn flash: a drag that crossed a finished edge (口径 2 — nothing
     // happened, but the player should see *why* something happened to nothing).
-    if (flash > 0.01 && flashEdge >= 0) {
+    // reduceMotion 下它退化成一张静图：定 alpha、定线宽，只按步数存在或消失。
+    const flashLive = reduceMotion ? flashSteps > 0 : flash > 0.01;
+    if (flashLive && flashEdge >= 0) {
       const l = lineFor(flashEdge, 0);
-      ctx.globalAlpha = flash * 0.55;
+      ctx.globalAlpha = reduceMotion ? 0.42 : flash * 0.55;
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = Math.max(6, Math.round(cell * 0.2)) + 6;
+      ctx.lineWidth = Math.max(6, Math.round(cell * 0.2)) + (reduceMotion ? 4 : 6);
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(l.x1, l.y1);
@@ -257,12 +339,17 @@ export function createView(canvas, { onEvent } = {}) {
       const p = vertexLocal(g, gm, Math.floor(v / g.cols), v % g.cols);
       const free = freeMoves(game, v).length;
       const used = g.inc[v].every((e) => game.drawn[e]);
-      ctx.fillStyle = used ? 'rgba(143,162,189,0.45)' : PIN;
-      if (free && game.outcome === 'playing') ctx.fillStyle = PIN_HOT;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, Math.max(3, cell * (used ? 0.09 : 0.12)), 0, Math.PI * 2);
-      ctx.fill();
-      if (free && game.outcome === 'playing') {
+      const hot = free && game.outcome === 'playing';
+      const spriteSize = Math.max(12, cell * (used ? 0.42 : 0.56));
+      const drawn = spriteAt(hot || !used ? 'pin' : 'pinDim', p.x, p.y, spriteSize, used && !hot ? 0.6 : 1);
+      if (!drawn) {
+        ctx.fillStyle = used ? 'rgba(143,162,189,0.45)' : PIN;
+        if (hot) ctx.fillStyle = PIN_HOT;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(3, cell * (used ? 0.09 : 0.12)), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (hot) {
         ctx.strokeStyle = 'rgba(244,247,251,0.35)';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -276,6 +363,8 @@ export function createView(canvas, { onEvent } = {}) {
       const v = game.cur.verts[game.cur.verts.length - 1];
       const p = vertexLocal(g, gm, Math.floor(v / g.cols), v % g.cols);
       const ink = INK[Math.min(game.strokes.length, INK.length - 1)];
+      const breathe = reduceMotion ? 1 : 1 + 0.06 * Math.sin(animClock * 4.2);
+      spriteAt('penGlow', p.x, p.y, Math.max(20, cell * 0.95) * breathe, 0.5);
       ctx.fillStyle = ink;
       ctx.beginPath();
       ctx.arc(p.x, p.y, Math.max(5, cell * 0.2), 0, Math.PI * 2);
@@ -305,14 +394,17 @@ export function createView(canvas, { onEvent } = {}) {
   }
 
   function hintRing() {
-    const t = (performance.now() % 900) / 900;
+    // 相位来自 animClock（只由定步长推进），不是 performance.now()：
+    // 否则暂停期间涟漪照样自己转，"暂停"就只剩一层遮罩。
+    const t = reduceMotion ? 0.35 : (animClock % HINT_PERIOD) / HINT_PERIOD;
     const g = game.g;
     ctx.save();
     ctx.strokeStyle = `rgba(120,220,255,${(0.9 - t * 0.6).toFixed(3)})`;
-    ctx.lineWidth = 3 + t * 5;
+    ctx.lineWidth = 3 + (reduceMotion ? 2 : t * 5);
     ctx.lineCap = 'round';
     if (hint.edge >= 0 && hint.edge < g.m) {
       const l = lineFor(hint.edge, 2);
+      if (!reduceMotion) spriteAt('hintGlow', (l.x1 + l.x2) / 2, (l.y1 + l.y2) / 2, gm.cell * 1.5, 0.35);
       ctx.beginPath();
       ctx.moveTo(l.x1, l.y1);
       ctx.lineTo(l.x2, l.y2);
@@ -321,7 +413,7 @@ export function createView(canvas, { onEvent } = {}) {
     if (hint.vertex >= 0) {
       const p = vertexLocal(g, gm, Math.floor(hint.vertex / g.cols), hint.vertex % g.cols);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, gm.cell * (0.25 + t * 0.12), 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, gm.cell * (0.25 + (reduceMotion ? 0.06 : t * 0.12)), 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();
@@ -338,14 +430,41 @@ export function createView(canvas, { onEvent } = {}) {
     c.closePath();
   }
 
+  // 一步仿真：所有衰减/寿命都按恒定步长 s 走，与这一帧实际隔了多久无关。
+  function stepSim(s) {
+    let busy = false;
+    animClock += s;
+    simSteps++;
+    if (reduceMotion) {
+      if (flashSteps > 0) { flashSteps--; flash = 0; busy = true; }
+    } else if (flash > 0.01) {
+      flash = Math.max(0, flash - s / FLASH_SECONDS);
+      busy = true;
+    }
+    if (hint) {
+      hint.left -= s;
+      if (hint.left <= 0) hint = null;
+      busy = true;
+    }
+    return busy;
+  }
+
+  // 一帧只做一件事：把墙钟差投进累加器，再按定步长把动画推进。
+  // `simAccumulator += elapsed` 是全仓唯一还在吃帧 dt 的地方，也就是帧率对拍的靶子 ——
+  // 把它改成 `+= 1/60`，30/60/120Hz 的 simSteps 必然分叉（实测见 commit 正文）。
   function frame(now) {
     raf = requestAnimationFrame(frame);
-    const dt = Math.min(64, now - (last || now));
+    const elapsed = last ? Math.min(0.25, (now - last) / 1000) : 0;
     last = now;
+    if (paused) return;                 // 暂停：一帧仿真都不推进，rAF 留着以便原地恢复
+    simAccumulator += elapsed;
     let busy = false;
-    if (flash > 0.01) { flash = Math.max(0, flash - dt / 320); busy = true; }
-    if (hint && now >= hint.until) { hint = null; busy = true; }
-    else if (hint) busy = true;
+    let guard = 0;
+    while (simAccumulator >= SIM_STEP && guard++ < 300) {
+      simAccumulator -= SIM_STEP;
+      if (stepSim(SIM_STEP)) busy = true;
+    }
+    if (guard >= 300) simAccumulator = 0;   // 标签页回来时的巨帧不补追，直接丢掉
     if (drag) busy = true;
     if (busy) draw();
   }
@@ -355,12 +474,41 @@ export function createView(canvas, { onEvent } = {}) {
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
 
+  // 回落只给没有 Pointer Events 的老 WebKit 用（iOS 12 及更早、部分内嵌 WebView）。
+  // 已经支持 pointer 就一条都不绑：一次触摸跑两遍规则会把同一笔重复喂给 game.js。
+  if (typeof globalThis.PointerEvent === 'undefined' && !('pointerdown' in canvas)) {
+    const touchPoint = (ev) => {
+      const t = (ev.touches && ev.touches[0]) || (ev.changedTouches && ev.changedTouches[0]);
+      if (!t) return null;
+      return { clientX: t.clientX, clientY: t.clientY, preventDefault: () => ev.preventDefault(), pointerId: -1 };
+    };
+    const viaTouch = (fn) => (ev) => {
+      const p = touchPoint(ev);
+      if (p) fn(p);
+    };
+    canvas.addEventListener('touchstart', viaTouch(down), { passive: false });
+    canvas.addEventListener('touchmove', viaTouch(move), { passive: false });
+    canvas.addEventListener('touchend', viaTouch(up), { passive: false });
+    canvas.addEventListener('touchcancel', viaTouch(up), { passive: false });
+    canvas.addEventListener('mousedown', down);
+    canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mouseup', up);
+    canvas.addEventListener('mouseleave', up);
+  }
+
   return {
     attach(next) {
       game = next;
       drag = null;
       hint = null;
+      // 重开/换关必须连时钟一起归零：留着上一局的 animClock 与累加器，
+      // 新局的第一帧会继承旧局的闪光相位与涟漪偏移。
       flash = 0;
+      flashSteps = 0;
+      flashEdge = -1;
+      animClock = 0;
+      simAccumulator = 0;
+      simSteps = 0;
       measure();
     },
     detach() { game = null; },
@@ -394,8 +542,24 @@ export function createView(canvas, { onEvent } = {}) {
       };
     },
     showHint(h) {
-      hint = h ? { edge: h.edge, vertex: h.vertex === null ? -1 : h.vertex, until: performance.now() + 2600 } : null;
+      // 寿命按定步长倒计时，不记墙钟绝对时刻：记时刻的话暂停十秒回来提示已经自己没了。
+      hint = h ? { edge: h.edge, vertex: h.vertex === null ? -1 : h.vertex, left: HINT_SECONDS } : null;
       draw();
+    },
+    setPaused(v) {
+      paused = !!v;
+      if (paused) drag = null;       // 松手：暂停幕不该把笔留在纸上
+      return paused;
+    },
+    isPaused: () => paused,
+    // 帧率对拍与验收要读的窗口状态：全部只由定步长推进，除 paused/reduceMotion。
+    simState() {
+      return {
+        paused, reduceMotion, simSteps, animClock, simAccumulator,
+        flash, flashSteps, flashEdge, hintLeft: hint ? hint.left : null,
+        sprites: Object.keys(sprite).filter((k) => sprite[k].ready).length,
+        simStep: SIM_STEP,
+      };
     },
     start() {
       if (!raf) { last = 0; raf = requestAnimationFrame(frame); }
