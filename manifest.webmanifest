@@ -1,0 +1,26 @@
+{
+  "name": "一笔 · EULERTRAIL",
+  "short_name": "一笔",
+  "description": "在格点上描出所有的边，每条边只能描一次。每一关的笔数上限由欧拉定理算出，并由构造与穷举双向复核。",
+  "id": "z-biz-game-eulertrail-cos",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e1116",
+  "theme_color": "#12151b",
+  "lang": "zh-CN",
+  "categories": ["games", "puzzle"],
+  "icons": [
+    { "src": "icons/icon-48.png", "sizes": "48x48", "type": "image/png" },
+    { "src": "icons/favicon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "icons/icon-96.png", "sizes": "96x96", "type": "image/png" },
+    { "src": "icons/icon-120.png", "sizes": "120x120", "type": "image/png" },
+    { "src": "icons/icon-152.png", "sizes": "152x152", "type": "image/png" },
+    { "src": "icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-1024.png", "sizes": "1024x1024", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

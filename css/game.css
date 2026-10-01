@@ -1,6 +1,12 @@
 /* 一笔 · EULERTRAIL — one stylesheet, no framework, no build step.
    Layout: board on the left, readout on the right; stacked under 820px so a phone gets a
-   full-width lattice and a short panel. */
+   full-width lattice and a short panel.
+
+   两处为移动端专门写死，改之前先看它们各自防的是什么：
+   - safe-area：viewport-fit=cover 与 env(safe-area-inset-*) 必须成对出现，只写一边时
+     iOS 上 env() 恒为 0，刘海直接吃掉顶栏那颗静音按钮。
+   - 命中区：所有可点的东西 min-height/min-width 44px。34px 的关卡格子在桌面鼠标下没问题，
+     在拇指下就是"点 A 打 B"。 */
 
 :root {
   --bg: #0e1116;
@@ -19,13 +25,26 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body {
-  background: radial-gradient(120% 100% at 50% 0%, var(--bg-2), var(--bg) 60%);
+  background: radial-gradient(120% 100% at 50% 0%, var(--bg-2), var(--bg) 60%) fixed;
   color: var(--ink); font-family: var(--mono); -webkit-font-smoothing: antialiased;
   overflow: hidden; user-select: none; cursor: default;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
-button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+/* 仓内生成的极淡噪点，破掉纯渐变的塑料感；alpha 已经在 PNG 里，这里只控混合强度。 */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: url("../assets/img/paper-grain.png") repeat;
+  opacity: 0.45; mix-blend-mode: overlay;
+}
+.topbar, .stage, .toast { position: relative; z-index: 1; }
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer;
+  min-height: 44px; min-width: 44px; -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 
-.topbar { display: flex; align-items: center; gap: 18px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.topbar { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
 .brand { font-size: 16px; letter-spacing: 0.06em; display: flex; align-items: baseline; gap: 8px; font-weight: 600; }
 .brand small { color: var(--ink-dim); font-size: 10px; letter-spacing: 0.28em; }
 .brand-mark { color: var(--amber); }
@@ -33,13 +52,21 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .modes button { padding: 6px 14px; font-size: 13px; color: var(--ink-dim); border: 1px solid transparent; border-radius: 6px; }
 .modes button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.04); }
 .modes button[aria-current="true"] { color: var(--amber); border-color: rgba(232, 176, 75, 0.4); background: rgba(232, 176, 75, 0.08); }
-.totals { margin-left: auto; font-size: 12px; color: var(--ink-dim); }
+.sys { display: flex; gap: 4px; margin-left: auto; }
+.sys button { display: inline-flex; align-items: center; justify-content: center;
+  font-size: 15px; color: var(--ink-dim); border: 1px solid var(--line); border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03); }
+.sys button:hover { color: var(--ink); border-color: rgba(226, 232, 240, 0.3); }
+.sys button[aria-pressed="true"] { color: var(--amber); border-color: rgba(232, 176, 75, 0.5); background: rgba(232, 176, 75, 0.1); }
+/* 静音态要一眼读出来：图标划掉 + 变暗，而不是"看起来还是响的"。 */
+#sound[aria-pressed="true"] { color: var(--ink-dim); text-decoration: line-through; border-color: rgba(232, 176, 75, 0.5); }
+.totals { font-size: 12px; color: var(--ink-dim); }
 .totals b { color: var(--amber); font-weight: 600; }
 
-.stage { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; padding: 18px; height: calc(100% - 53px); }
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; padding: 18px; height: calc(100% - 61px); }
 .board { position: relative; display: grid; grid-template-rows: 1fr auto; min-height: 0; }
 #board { width: 100%; height: 100%; min-height: 0; display: block; touch-action: none; cursor: crosshair; }
-.hint-line { min-height: 20px; font-size: 12px; color: var(--ink-dim); text-align: center; }
+.hint-line { min-height: 22px; font-size: 12px; color: var(--ink-dim); text-align: center; }
 .hint-line b { color: var(--cyan); font-weight: 600; }
 .hint-line .warn { color: var(--amber); }
 
@@ -68,7 +95,7 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 .shelf { display: flex; flex-wrap: wrap; gap: 6px; }
 .shelf .tier { width: 100%; font-size: 11px; color: var(--ink-dim); margin-top: 6px; letter-spacing: 0.1em; }
-.shelf button { min-width: 34px; padding: 7px 6px; font-size: 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-dim); }
+.shelf button { min-width: 44px; padding: 7px 6px; font-size: 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-dim); }
 .shelf button:hover { color: var(--ink); border-color: rgba(226, 232, 240, 0.3); }
 .shelf button.done { color: var(--amber); border-color: rgba(232, 176, 75, 0.35); }
 .shelf button.perfect { color: var(--cyan); border-color: rgba(95, 201, 224, 0.35); }
@@ -77,11 +104,11 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .shelf .wide { width: 100%; }
 
 .about { font-size: 11px; color: var(--ink-dim); line-height: 1.7; border-top: 1px solid var(--line); padding-top: 10px; }
-.about summary { cursor: pointer; letter-spacing: 0.08em; }
+.about summary { cursor: pointer; letter-spacing: 0.08em; min-height: 44px; display: flex; align-items: center; }
 .about code { color: var(--amber); font-size: 10px; }
 .about b { color: var(--ink); }
 .about .save { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
-.about #wipe { font-size: 10px; padding: 5px 9px; color: var(--ink-dim); border-color: rgba(232, 176, 75, 0.4); }
+.about #wipe { font-size: 10px; min-height: 36px; padding: 5px 9px; color: var(--ink-dim); border: 1px solid rgba(232, 176, 75, 0.4); border-radius: 7px; }
 
 .curtain { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(10, 12, 16, 0.72); backdrop-filter: blur(3px); border-radius: 12px; }
 .curtain[hidden] { display: none; }
@@ -94,14 +121,43 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .curtain-actions button { flex: 1; padding: 10px; font-size: 13px; border: 1px solid var(--line); border-radius: 9px; }
 .curtain-actions .primary { border-color: rgba(232, 176, 75, 0.6); color: var(--amber); background: rgba(232, 176, 75, 0.1); }
 
-.toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); max-width: 80vw;
+/* 暂停幕与教学幕共用一套壳；教学比结算多一栏滚动，因为步骤在手机上会超出一屏。 */
+.veil { position: absolute; inset: 0; display: grid; place-items: center; padding: 12px;
+  background: rgba(8, 10, 14, 0.78); backdrop-filter: blur(4px); border-radius: 12px; z-index: 3; }
+.veil[hidden] { display: none; }
+.veil-card { width: min(430px, 96%); max-height: 92%; overflow: auto; border: 1px solid rgba(95, 201, 224, 0.3);
+  border-radius: 14px; background: var(--bg-2); padding: 20px 22px; }
+.veil-card h2 { font-size: 18px; margin-bottom: 10px; color: var(--ink); }
+.veil-card p { font-size: 12px; line-height: 1.8; color: var(--ink-dim); }
+.veil-card .steps { margin: 4px 0 12px; padding-left: 18px; display: grid; gap: 8px; }
+.veil-card .steps li { font-size: 12.5px; line-height: 1.75; color: var(--ink-dim); }
+.veil-card .steps b { color: var(--ink); font-weight: 600; }
+.veil-card code { color: var(--amber); font-size: 11px; }
+.veil-card kbd { font: inherit; font-size: 11px; color: var(--cyan); border: 1px solid rgba(95, 201, 224, 0.35);
+  border-radius: 5px; padding: 1px 5px; background: rgba(95, 201, 224, 0.08); }
+.veil-card .keys { margin-bottom: 12px; line-height: 2.2; }
+.veil-actions { display: flex; gap: 8px; }
+.veil-actions button { flex: 1; padding: 10px; font-size: 13px; border: 1px solid var(--line); border-radius: 9px; }
+.veil-actions .primary { border-color: rgba(232, 176, 75, 0.6); color: var(--amber); background: rgba(232, 176, 75, 0.1); }
+
+.toast { position: fixed; left: 50%; bottom: calc(26px + env(safe-area-inset-bottom)); transform: translateX(-50%); max-width: 80vw;
   padding: 9px 14px; font-size: 12px; border: 1px solid var(--line); border-radius: 9px;
   background: var(--bg-2); color: var(--ink); word-break: break-all; }
 .toast[hidden] { display: none; }
 
 @media (max-width: 820px) {
-  .stage { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; height: calc(100% - 96px); overflow: auto; }
-  .topbar { flex-wrap: wrap; gap: 10px; }
+  .stage { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; height: calc(100% - 132px); overflow: auto; }
+  .topbar { flex-wrap: wrap; gap: 8px; }
+  .sys { margin-left: 0; }
   .totals { margin-left: 0; width: 100%; }
   #board { min-height: 56vw; }
+}
+
+/* 系统要求减少动效时：幕布不再模糊、按钮不再有过渡、Toast 不再滑入。
+   画布那一侧的真分支在 js/view.js（关掉涟漪/闪光/笔头呼吸），两边都要有才算做了。 */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  .veil, .curtain { backdrop-filter: none; }
+  .toast { transform: none; }
+  .shelf button, .controls button, .sys button { transition: none; }
 }
