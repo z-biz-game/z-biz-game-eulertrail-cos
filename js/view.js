@@ -36,6 +36,13 @@ export function createView(canvas, { onEvent } = {}) {
   let flash = 0;            // 0..1, the "that edge is already drawn" nudge
   let flashEdge = -1;       // which edge got the nudge
 
+  // ---- 减弱动效（prefers-reduced-motion）----
+  // hintRing 的 t = (now % 900) / 900 是一段纯装饰的呼吸：线宽从 3 长到 8、透明度从 0.9 淡到 0.3。
+  // 减弱动效下**把 t 钉在 0.5**——环还在、还是那条被指的边、亮度还是能看清，只是不再一涨一落。
+  // 提示环本身是"往这儿走"的信息载体，连环一起删掉等于把提示删了，所以只停它的相位。
+  let reduceMotion = false;
+  const ringPhase = () => (reduceMotion ? 0.5 : (performance.now() % 900) / 900);
+
   function measure() {
     const box = canvas.getBoundingClientRect();
     const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
@@ -305,7 +312,7 @@ export function createView(canvas, { onEvent } = {}) {
   }
 
   function hintRing() {
-    const t = (performance.now() % 900) / 900;
+    const t = ringPhase();
     const g = game.g;
     ctx.save();
     ctx.strokeStyle = `rgba(120,220,255,${(0.9 - t * 0.6).toFixed(3)})`;
@@ -366,6 +373,16 @@ export function createView(canvas, { onEvent } = {}) {
     detach() { game = null; },
     measure,
     redraw: draw,
+    // The gate the runtime pref flip lands on. `set` is idempotent and redraws, so a player who
+    // toggles the OS switch sees the ring settle on the same frame rather than at the next hint.
+    setReduceMotion(v) {
+      const on = !!v;
+      if (on === reduceMotion) return reduceMotion;
+      reduceMotion = on;
+      if (reduceMotion) draw();
+      return reduceMotion;
+    },
+    isReducedMotion: () => reduceMotion,
     // The two mappings the spec demands of a test hook, in client pixels.
     vertexPoint(r, c) {
       const box = canvas.getBoundingClientRect();
