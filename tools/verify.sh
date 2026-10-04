@@ -30,10 +30,10 @@ fi
 # either fails to bind $CDP_PORT (and then every eval in this script silently targets the
 # *other* browser, whose pages do not contain this game) or steals the profile lock.
 # Wait for the field to clear instead of losing the run.
-busy_chrome() { pgrep -f 'remote-debugging-port' 2>/dev/null | wc -l | tr -d ' '; }
+busy_chrome() { ps -Ao command= | awk '/remote-debugging[-]port/ && !/--type=/' | wc -l | tr -d ' '; }  # instances, not procs
 WAITED=0
 while [ "$(busy_chrome)" != "0" ]; do
-  echo "waiting for a sibling headless Chrome to exit (${WAITED}s, $(busy_chrome) procs)"
+  echo "waiting for a sibling headless Chrome to exit (${WAITED}s, $(busy_chrome) browsers)"
   sleep "${CHROME_RETRY:-60}"
   WAITED=$((WAITED + ${CHROME_RETRY:-60}))
   [ "$WAITED" -ge "${CHROME_WAIT:-600}" ] && { echo "another Chrome still owns DevTools after ${WAITED}s; nothing was run" >&2; exit 6; }
