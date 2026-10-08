@@ -25,6 +25,11 @@ jobs:
         run: npm run check
       - name: Suites
         run: npm run unit
+
+      # 文档行号对账：README / DESIGN / deliverable 里每处「文件加行号」都读回真文件对账。
+      # 单列一步而不是并进 Suites，是为了让日志能点名是文档这条腿红的。
+      - name: Docs citation leg
+        run: node tools/docs-test.mjs
       # 部署集闸：按 tools/assemble-site.sh 那份清单真拷一遍产物，要求页面会去要的东西
       # 都在里面。这一仓曾经因为清单落后于页面而线上 404 自己的 manifest/sw.js/图标，
       # 而本地一切全绿——因为本地根本没有「按清单拷」这一步。
