@@ -456,20 +456,6 @@ function fullscreenElement() {
 
 // 绑到 HUD 上真存在的 #fullscreen。iOS Safari 没有 Element Fullscreen API，这里必须
 // 如实告诉玩家"这个浏览器不给全屏"，而不是安静地什么都不发生。
-function toggleFullscreen() {
-  const d = document;
-  if (fullscreenElement()) {
-    const exit = d.exitFullscreen || d.webkitExitFullscreen;
-    if (exit) { const p = exit.call(d); if (p && p.catch) p.catch(() => {}); }
-    return false;
-  }
-  const root = d.documentElement;
-  const req = root.requestFullscreen || root.webkitRequestFullscreen || root.webkitRequestFullScreen;
-  if (!req) { toast('这个浏览器不支持全屏（iOS Safari 没有元素级 Fullscreen API）'); return false; }
-  const p = req.call(root);
-  if (p && p.catch) p.catch((err) => toast(`全屏被拒绝：${err && err.message ? err.message : '需要用户手势'}`));
-  return true;
-}
 
 function syncFullscreen() {
   const on = !!fullscreenElement();

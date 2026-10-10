@@ -59,21 +59,6 @@ function shapeOfRecord(raw) {
 }
 
 // 第二段：逐字段夹进合法域。缺字段回落默认值，类型错与越界值丢整条（宁可少一段成绩）。
-function sanitizeRecord(raw) {
-  const r = shapeOfRecord(raw);
-  if (!r) return null;
-  const plays = clampWhole(r.plays, 0, 1e6) || 0;
-  const hints = clampWhole(r.hints, 0, 1e6) || 0;
-  const lostWithoutUndo = clampWhole(r.lostWithoutUndo, 0, 1e6) || 0;
-  const solved = r.solved === true;
-  const best = clampWhole(r.best, 0, 1e4);
-  const par = clampWhole(r.par, 0, 1e4);
-  if (r.solved !== undefined && typeof r.solved !== 'boolean') return null;
-  if (r.stars !== undefined && ![0, 1, 2, 3].includes(whole(r.stars))) return null;
-  const stars = [0, 1, 2, 3].includes(whole(r.stars)) ? whole(r.stars) : (solved ? 2 : 0);
-  const at = clampWhole(r.at, 0, Number.MAX_SAFE_INTEGER);
-  return { solved, best: best === null ? (par === null ? 0 : par) : best, par, stars, plays, hints, lostWithoutUndo, at: at || 0 };
-}
 
 function sanitizeDaily(raw) {
   const out = {};
