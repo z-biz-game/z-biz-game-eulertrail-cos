@@ -19,7 +19,8 @@
 // screen prints the band instead of a leaderboard.
 
 const KEY = 'eulertrail.save.v1';
-const MAX_UNLOCK = 10000;
+// 存档格式版本号。写档带上、读档校验：将来改形状时旧档宁可整档丢弃，也不能被误读。
+export const SAVE_VERSION = 1;
 
 function hasLocalStorage() {
   try {
@@ -32,6 +33,7 @@ function hasLocalStorage() {
 
 function blank() {
   return {
+    v: SAVE_VERSION,
     records: {},
     daily: {},
     prefs: {},
@@ -110,59 +112,62 @@ function sanitizePrefs(raw) {
 
 let cache = null;
 
-function zeroDropped() { return { records: 0, daily: 0, prefs: 0, stats: 0, whole: 0 }; }
+// 数字字段的归一自带一份，不依赖仓里有没有 count() —— 少一层隐式耦合。
+function recordNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
 
-let dropped = zeroDropped();
+// 存档两段式解码的第一段：整档 JSON 落到这里之后，**逐字段**归一。
+// 一条记录不是"能用/不能用"二选一 —— 类型错的字段自己退成默认值，整条照样留下。
+// 第二段（sanitizeRecords）在下面：它只丢掉归一后彻底没意义的记录，别的记录不受牵连。
+function sanitizeRecord(r) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return null;
+  const out = {};
+  out.solved = !!r.solved;
+  out.best = recordNum(r.best);
+  out.par = r.par === null || r.par === undefined ? null : recordNum(r.par);
+  out.stars = recordNum(r.stars);
+  out.plays = recordNum(r.plays);
+  out.hints = recordNum(r.hints);
+  out.lostWithoutUndo = recordNum(r.lostWithoutUndo);
+  out.at = recordNum(r.at);
+  return out;
+}
 
-// 两段式解码的入口：坏 JSON / 顶层不是对象 ⇒ 整份重来（这没有别的办法，也确实只有一份）；
-// 但结构内的单条坏数据只丢那一条。
-function decode(rawJson) {
-  const base = blank();
-  let p = null;
-  try {
-    p = JSON.parse(rawJson);
-  } catch (err) {
-    return { save: base, dropped: Object.assign(zeroDropped(), { whole: 1 }) };
+// 逐条隔离：坏的那条丢掉，好的那些原样留下，绝不因为一条把整份存档作废。
+function sanitizeRecords(p) {
+  const out = {};
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return out;
+  for (const [id, rec] of Object.entries(p)) {
+    const clean = sanitizeRecord(rec);
+    if (clean) out[id] = clean;
   }
-  if (!p || typeof p !== 'object' || Array.isArray(p)) {
-    return { save: base, dropped: Object.assign(zeroDropped(), { whole: 1 }) };
-  }
-  const d = zeroDropped();
-  const save = base;
-  if (p.records && typeof p.records === 'object' && !Array.isArray(p.records)) {
-    for (const [id, raw] of Object.entries(p.records)) {
-      const key = safeKey(id);
-      const clean = key ? sanitizeRecord(raw) : null;
-      if (!clean) { d.records++; continue; }
-      save.records[key] = clean;
-    }
-  } else if (p.records !== undefined) {
-    d.records++;
-  }
-  const daily = sanitizeDaily(p.daily);
-  if (p.daily && typeof p.daily === 'object' && Object.keys(p.daily).length && !Object.keys(daily).length) d.daily++;
-  save.daily = daily;
-  const prefs = sanitizePrefs(p.prefs);
-  if (p.prefs && typeof p.prefs === 'object' && !Object.keys(prefs).length && Object.keys(p.prefs).length) d.prefs++;
-  save.prefs = prefs;
-  const unlocked = clampWhole(p.unlocked, 1, MAX_UNLOCK);
-  save.unlocked = unlocked === null ? base.unlocked : unlocked;
-  if (p.stats && typeof p.stats === 'object' && !Array.isArray(p.stats)) {
-    for (const k of ['wins', 'plays', 'strokes', 'hints', 'losses']) {
-      const v = clampWhole(p.stats[k], 0, 1e9);
-      if (v === null) { if (p.stats[k] !== undefined) d.stats++; continue; }
-      save.stats[k] = v;
-    }
-  }
-  return { save, dropped: d };
+  return out;
 }
 
 function load() {
   if (cache) return cache;
-  if (hasLocalStorage()) {
-    let raw = null;
+  const ls = backend();
+  const raw = ls ? globalThis.localStorage.getItem(KEY) : null;
+  if (raw) {
     try {
-      raw = localStorage.getItem(KEY);
+      const p = JSON.parse(raw);
+      // 版本门：只认本仓写出去的版本。将来升 v2 时，旧档宁可整档丢弃也不能被误读成新档。
+      if (p && typeof p === 'object' && !Array.isArray(p)
+          && (p.v === undefined || p.v === SAVE_VERSION)) {
+        const base = blank();
+        cache = {
+          records: sanitizeRecords(p.records),
+          daily: p.daily && typeof p.daily === 'object' ? p.daily : base.daily,
+          unlocked: Number(p.unlocked) > 0 ? Math.trunc(Number(p.unlocked)) : base.unlocked,
+          stats: { ...base.stats, ...(p.stats || {}) },
+        };
+        for (const k of ['wins', 'plays', 'strokes', 'hints', 'losses']) {
+          if (!Number.isFinite(cache.stats[k]) || cache.stats[k] < 0) cache.stats[k] = 0;
+        }
+        return cache;
+      }
     } catch (err) {
       raw = null;
     }
@@ -180,7 +185,7 @@ function load() {
 function persist() {
   if (!hasLocalStorage()) return false;
   try {
-    localStorage.setItem(KEY, JSON.stringify(cache));
+    globalThis.localStorage.setItem(KEY, JSON.stringify(cache));
     return true;
   } catch (err) {
     return false;   // memory-only session (quota, blocked cookies, no window)
@@ -271,13 +276,8 @@ export const store = {
 
   // The raw string, for the tests that assert a save survives a round trip.
   dump() {
-    if (hasLocalStorage()) {
-      try {
-        const raw = localStorage.getItem(KEY);
-        if (raw !== null) return raw;
-      } catch (err) { /* fall through to the in-memory copy */ }
-    }
-    return JSON.stringify(cache || blank());
+    const ls = backend();
+    return ls ? globalThis.localStorage.getItem(KEY) : JSON.stringify(cache);
   },
 
   // 只给验收用：把一份原始 JSON 灌进解码器，看它丢掉几条、留下几条，不碰真存档。

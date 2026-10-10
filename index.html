@@ -2,28 +2,17 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="twitter:card" content="summary">
 <meta name="theme-color" content="#12151b">
-<meta name="description" content="一笔 · EULERTRAIL：在格点上描出所有边，边不能重复。每一关的笔数上限都是欧拉定理算出来的，并且由构造和穷举双向复核。">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="一笔">
-<meta property="og:type" content="website">
-<meta property="og:title" content="一笔 · EULERTRAIL">
-<meta property="og:description" content="格点上一笔不重复地描完所有的边。笔数上限由欧拉定理算出，再由构造与穷举复核一遍。">
-<meta property="og:image" content="assets/img/og-cover.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="assets/img/og-cover.png">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
-<link rel="icon" type="image/png" sizes="48x48" href="icons/icon-48.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="manifest" href="manifest.webmanifest">
+<meta name="description" content="一笔 · EULERTRAIL：在格点上描出所有边，边不能重复。每一关的笔数上限都是欧拉定理算出来的，并且由构造和穷举双向复核。"><meta property="og:title" content="一笔 · EULERTRAIL"><meta property="og:description" content="一笔 · EULERTRAIL：在格点上描出所有边，边不能重复。每一关的笔数上限都是欧拉定理算出来的，并且由构造和穷举双向复核。"><meta property="og:image" content="https://z-biz-game.github.io/z-biz-game-eulertrail-cos/icons/icon-512.png"><meta name="twitter:image" content="https://z-biz-game.github.io/z-biz-game-eulertrail-cos/icons/icon-512.png">
+<link rel="icon" href="data:,">
 <title>一笔 · EULERTRAIL</title>
 <link rel="stylesheet" href="css/game.css">
+
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
 </head>
 <body>
 <header class="topbar">
@@ -32,6 +21,7 @@
     <button type="button" data-mode="campaign">战役</button>
     <button type="button" data-mode="daily">每日</button>
     <button type="button" data-mode="random">随机</button>
+      <button type="button" id="btn-fullscreen" aria-pressed="false" title="全屏 (F)">全屏</button>
   </nav>
   <div class="sys" role="group" aria-label="系统">
     <button type="button" id="help" aria-label="玩法说明" title="玩法说明（H 或 ?）">?</button>
@@ -109,19 +99,6 @@
 
 <p class="toast" id="toast" hidden></p>
 <script type="module" src="js/main.js"></script>
-<script>
-// file:// 下没有 SW 的容身之处：Chrome 直接抛 SecurityError，而这段在内联块里跑，
-// 抛出就是整页一条未捕获异常。所以先判协议再注册，并且把失败咽进 console.warn ——
-// 装不上是降级，不是错误。http/https 才注册；版本号与 sw.js 里的 VERSION 同源于此。
-(function () {
-  if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
-  if (!('serviceWorker' in navigator)) return;
-  window.addEventListener('load', function () {
-    navigator.serviceWorker.register('sw.js', { scope: './' }).catch(function (err) {
-      console.warn('service worker 未注册：', err && err.message);
-    });
-  });
-})();
-</script>
+  <script src="js/sw-register.js"></script>
 </body>
 </html>

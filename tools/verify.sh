@@ -12,7 +12,7 @@
 #   SKIP_UNIT=1 ./tools/verify.sh             # browser job in CI: the suites are their own job
 set -u
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-CDP_PORT=${CDP_PORT:-9346}
+CDP_PORT=${CDP_PORT:-9346}; if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$CDP_PORT" -sTCP:LISTEN >/dev/null 2>&1; then echo ":$CDP_PORT is already LISTENING — a sibling gate or an orphan Chrome holds it; attaching there reads someone else's browser. Wait for it to finish, or rerun with CDP_PORT=<a free port>." >&2; lsof -nP -iTCP:"$CDP_PORT" -sTCP:LISTEN >&2 || true; exit 6; fi  # 一机一台：撞在同一个默认口上时不报错的是 Chrome，报错的是绿——先让路再开闸
 WEB_PORT=${WEB_PORT:-5186}
 BASE=${BASE_URL:-http://127.0.0.1:$WEB_PORT/}
 CHROME=${CHROME_BIN:-}
@@ -30,10 +30,10 @@ fi
 # either fails to bind $CDP_PORT (and then every eval in this script silently targets the
 # *other* browser, whose pages do not contain this game) or steals the profile lock.
 # Wait for the field to clear instead of losing the run.
-busy_chrome() { pgrep -f 'remote-debugging-port' 2>/dev/null | wc -l | tr -d ' '; }
+busy_chrome() { ps -Ao command= | awk '/remote-debugging[-]port/ && !/--type=/' | wc -l | tr -d ' '; }  # instances, not procs
 WAITED=0
 while [ "$(busy_chrome)" != "0" ]; do
-  echo "waiting for a sibling headless Chrome to exit (${WAITED}s, $(busy_chrome) procs)"
+  echo "waiting for a sibling headless Chrome to exit (${WAITED}s, $(busy_chrome) browsers)"
   sleep "${CHROME_RETRY:-60}"
   WAITED=$((WAITED + ${CHROME_RETRY:-60}))
   [ "$WAITED" -ge "${CHROME_WAIT:-600}" ] && { echo "another Chrome still owns DevTools after ${WAITED}s; nothing was run" >&2; exit 6; }
@@ -88,6 +88,11 @@ if [ -z "${SKIP_UNIT:-}" ]; then
     echo "--- $f"
     node "$f" || FAILED=1
   done
+  # 部署集闸：ci.yml 跑这两步、本地整闸以前一次都不跑。缺这一步就是「本地全绿、线上 404 自己的
+  # manifest / sw.js / 图标」这一整类坏法。它不碰 Chrome，也不读页面，纯查产物。
+  echo "=== deploy-set ==="
+  node tools/deploy-set.mjs || FAILED=1
+  node tools/deploy-set-selftest.mjs || FAILED=1
 fi
 
 export CDP_PORT

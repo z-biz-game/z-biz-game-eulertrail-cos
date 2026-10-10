@@ -242,3 +242,14 @@
   这条由 `test/library.test.mjs` 的带不重叠断言把守。
 - 复现：`node test/balance.mjs`、`node -e "import('./js/core/library.js').then(m => console.log(m.stats()))"`、
   `node tools/bake.mjs`（会重写 `js/data/lots.js`，种子固定所以结果可 diff）。
+
+## 实测校正（2026-10-08 追加）
+
+上面 1–4 节保持**提案原文**：本仓的文档行号腿（`tools/docs-test.mjs`）按行号引它们作证据，往中间插一行就让那批引用
+整批漂到隔壁句子。这一节量的是落地之后的树，与提案不同处以下面为准。
+
+- **笔数上限来自定理而不是投票**：`par`（`js/core/theory.js:33-35`）就是 `max(1, odd/2)`，空图返回 `null`——
+  给一关无边打印「0 笔」是说谎；烘焙期的对账在 `declared` 那道检查（`js/core/graph.js:86`），序列化出来的 `par` 与定理值不等就抛。
+- **穷举只在有限边数以内做**：`firstMoveAudit`（`js/core/bruteforce.js:104`）带迭代上限，超预算的关卡不是被丢掉而是进不了池子。
+- **零依赖的代价写在存档那一层**：`js/core/storage.js`（190 行）在没有 `window` 时退化成内存对象，
+  双击 `index.html` 打开与 CI 的 headless Chrome 走的是同一条代码路径。
