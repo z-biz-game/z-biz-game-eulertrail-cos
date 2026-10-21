@@ -21,6 +21,8 @@
 const KEY = 'eulertrail.save.v1';
 // 存档格式版本号。写档带上、读档校验：将来改形状时旧档宁可整档丢弃，也不能被误读。
 export const SAVE_VERSION = 1;
+// 战役解锁到第几关的上限：九万关没有意义，但"无穷大"会让一份坏档把界面撑坏。
+const MAX_UNLOCK = 10000;
 
 function hasLocalStorage() {
   try {
@@ -97,62 +99,90 @@ function sanitizePrefs(raw) {
 
 let cache = null;
 
-// 数字字段的归一自带一份，不依赖仓里有没有 count() —— 少一层隐式耦合。
-function recordNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+// 第二段：逐字段夹进合法域。缺字段回落默认值，类型错与越界值丢整条（宁可少一段成绩）。
+//
+// 哪一类的错值丢整条、哪一类只退成默认值，是有分寸的：
+//   · `solved` 不是布尔、`stars` 不在 {0,1,2,3} ⇒ 这条记录说的是另一件事，整条丢掉；
+//   · `plays` / `hints` / `best` / `par` / `at` 越界或类型不对 ⇒ 只把这一个字段退回默认值，
+//     记录本身留着（成绩少算一次，比连坐几十条一起没了强）。
+// 这条分寸是被验收钉着的：坏档样本里 "wrongtype" 与 "starstruck" 两条要消失，
+// 而 "clampable" 那条必须留下来、只是 plays 与 hints 归零。
+function sanitizeRecord(raw) {
+  const r = shapeOfRecord(raw);
+  if (!r) return null;
+  const plays = clampWhole(r.plays, 0, 1e6) || 0;
+  const hints = clampWhole(r.hints, 0, 1e6) || 0;
+  const lostWithoutUndo = clampWhole(r.lostWithoutUndo, 0, 1e6) || 0;
+  const solved = r.solved === true;
+  const best = clampWhole(r.best, 0, 1e4);
+  const par = clampWhole(r.par, 0, 1e4);
+  if (r.solved !== undefined && typeof r.solved !== 'boolean') return null;
+  if (r.stars !== undefined && ![0, 1, 2, 3].includes(whole(r.stars))) return null;
+  const stars = [0, 1, 2, 3].includes(whole(r.stars)) ? whole(r.stars) : (solved ? 2 : 0);
+  const at = clampWhole(r.at, 0, Number.MAX_SAFE_INTEGER);
+  return { solved, best: best === null ? (par === null ? 0 : par) : best, par, stars, plays, hints, lostWithoutUndo, at: at || 0 };
 }
 
-// 存档两段式解码的第一段：整档 JSON 落到这里之后，**逐字段**归一。
-// 一条记录不是"能用/不能用"二选一 —— 类型错的字段自己退成默认值，整条照样留下。
-// 第二段（sanitizeRecords）在下面：它只丢掉归一后彻底没意义的记录，别的记录不受牵连。
-function sanitizeRecord(r) {
-  if (!r || typeof r !== 'object' || Array.isArray(r)) return null;
-  const out = {};
-  out.solved = !!r.solved;
-  out.best = recordNum(r.best);
-  out.par = r.par === null || r.par === undefined ? null : recordNum(r.par);
-  out.stars = recordNum(r.stars);
-  out.plays = recordNum(r.plays);
-  out.hints = recordNum(r.hints);
-  out.lostWithoutUndo = recordNum(r.lostWithoutUndo);
-  out.at = recordNum(r.at);
-  return out;
-}
+// 上一次解码丢了几条坏数据：验收垃圾档时读的就是这个，不是"没抛异常"。
+// 这组计数器与 decode() 是一对，并线时**定义被丢了、调用点还留着** ⇒ 运行期 ReferenceError。
+function zeroDropped() { return { records: 0, daily: 0, prefs: 0, stats: 0, whole: 0 }; }
 
-// 逐条隔离：坏的那条丢掉，好的那些原样留下，绝不因为一条把整份存档作废。
-function sanitizeRecords(p) {
-  const out = {};
-  if (!p || typeof p !== 'object' || Array.isArray(p)) return out;
-  for (const [id, rec] of Object.entries(p)) {
-    const clean = sanitizeRecord(rec);
-    if (clean) out[id] = clean;
+let dropped = zeroDropped();
+
+// 两段式解码的入口：坏 JSON / 顶层不是对象 ⇒ 整份重来（这没有别的办法，也确实只有一份）；
+// 但结构内的单条坏数据只丢那一条。
+function decode(rawJson) {
+  const base = blank();
+  let p = null;
+  try {
+    p = JSON.parse(rawJson);
+  } catch (err) {
+    return { save: base, dropped: Object.assign(zeroDropped(), { whole: 1 }) };
   }
-  return out;
+  if (!p || typeof p !== 'object' || Array.isArray(p)) {
+    return { save: base, dropped: Object.assign(zeroDropped(), { whole: 1 }) };
+  }
+  // 版本门：只认本仓写出去的版本。将来升 v2 时，旧档宁可整档丢弃也不能被误读成新档。
+  // 缺 `v` 的老档照读（那是本仓写这个键之前的老形状）。
+  if (p.v !== undefined && p.v !== SAVE_VERSION) {
+    return { save: base, dropped: Object.assign(zeroDropped(), { whole: 1 }) };
+  }
+  const d = zeroDropped();
+  const save = base;
+  if (p.records && typeof p.records === 'object' && !Array.isArray(p.records)) {
+    for (const [id, raw] of Object.entries(p.records)) {
+      const key = safeKey(id);
+      const clean = key ? sanitizeRecord(raw) : null;
+      if (!clean) { d.records++; continue; }
+      save.records[key] = clean;
+    }
+  } else if (p.records !== undefined) {
+    d.records++;
+  }
+  const daily = sanitizeDaily(p.daily);
+  if (p.daily && typeof p.daily === 'object' && Object.keys(p.daily).length && !Object.keys(daily).length) d.daily++;
+  save.daily = daily;
+  const prefs = sanitizePrefs(p.prefs);
+  if (p.prefs && typeof p.prefs === 'object' && !Object.keys(prefs).length && Object.keys(p.prefs).length) d.prefs++;
+  save.prefs = prefs;
+  const unlocked = clampWhole(p.unlocked, 1, MAX_UNLOCK);
+  save.unlocked = unlocked === null ? base.unlocked : unlocked;
+  if (p.stats && typeof p.stats === 'object' && !Array.isArray(p.stats)) {
+    for (const k of ['wins', 'plays', 'strokes', 'hints', 'losses']) {
+      const v = clampWhole(p.stats[k], 0, 1e9);
+      if (v === null) { if (p.stats[k] !== undefined) d.stats++; continue; }
+      save.stats[k] = v;
+    }
+  }
+  return { save, dropped: d };
 }
 
 function load() {
   if (cache) return cache;
-  const ls = backend();
-  const raw = ls ? globalThis.localStorage.getItem(KEY) : null;
-  if (raw) {
+  if (hasLocalStorage()) {
+    let raw = null;
     try {
-      const p = JSON.parse(raw);
-      // 版本门：只认本仓写出去的版本。将来升 v2 时，旧档宁可整档丢弃也不能被误读成新档。
-      if (p && typeof p === 'object' && !Array.isArray(p)
-          && (p.v === undefined || p.v === SAVE_VERSION)) {
-        const base = blank();
-        cache = {
-          records: sanitizeRecords(p.records),
-          daily: p.daily && typeof p.daily === 'object' ? p.daily : base.daily,
-          unlocked: Number(p.unlocked) > 0 ? Math.trunc(Number(p.unlocked)) : base.unlocked,
-          stats: { ...base.stats, ...(p.stats || {}) },
-        };
-        for (const k of ['wins', 'plays', 'strokes', 'hints', 'losses']) {
-          if (!Number.isFinite(cache.stats[k]) || cache.stats[k] < 0) cache.stats[k] = 0;
-        }
-        return cache;
-      }
+      raw = globalThis.localStorage.getItem(KEY);
     } catch (err) {
       raw = null;
     }
@@ -261,8 +291,7 @@ export const store = {
 
   // The raw string, for the tests that assert a save survives a round trip.
   dump() {
-    const ls = backend();
-    return ls ? globalThis.localStorage.getItem(KEY) : JSON.stringify(cache);
+    return hasLocalStorage() ? globalThis.localStorage.getItem(KEY) : JSON.stringify(cache);
   },
 
   // 只给验收用：把一份原始 JSON 灌进解码器，看它丢掉几条、留下几条，不碰真存档。

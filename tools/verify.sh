@@ -29,15 +29,18 @@ fi
 # whole process, so a sibling repo's Chrome does not merely waste a core: a second instance
 # either fails to bind $CDP_PORT (and then every eval in this script silently targets the
 # *other* browser, whose pages do not contain this game) or steals the profile lock.
-# Wait for the field to clear instead of losing the run.
-busy_chrome() { ps -Ao command= | awk '/remote-debugging[-]port/ && !/--type=/' | wc -l | tr -d ' '; }  # instances, not procs
-WAITED=0
-while [ "$(busy_chrome)" != "0" ]; do
-  echo "waiting for a sibling headless Chrome to exit (${WAITED}s, $(busy_chrome) browsers)"
-  sleep "${CHROME_RETRY:-60}"
-  WAITED=$((WAITED + ${CHROME_RETRY:-60}))
-  [ "$WAITED" -ge "${CHROME_WAIT:-600}" ] && { echo "another Chrome still owns DevTools after ${WAITED}s; nothing was run" >&2; exit 6; }
-done
+#
+# 这条规矩不变，但**不再死等**：别的车道开着浏览器时，把它们列出来、让操作者确认那不是自己的，
+# 再显式放行（ALLOW_ORPHAN_CHROME=1）。本闸仍然只绑自己的端口 —— :9346 撞车照样 exit 6，
+# 绝不骑在别人的浏览器上。这与 ulam / euclid / chomp 三个兄弟仓是同一套口径。
+ORPHANS=$(ps -Ao command= | awk '/remote-debugging[-]port/ && !/--type=/' | wc -l | tr -d ' ')  # instances, not procs
+if [ "${ORPHANS}" != "0" ] && [ -z "${ALLOW_ORPHAN_CHROME:-}" ]; then
+  echo "$ORPHANS headless Chrome(s) with a remote-debugging-port are already running on this" >&2
+  echo "machine. One at a time is the rule; verify that they are yours, then set" >&2
+  echo "ALLOW_ORPHAN_CHROME=1 CDP_PORT=<free port> to proceed." >&2
+  ps -Ao pid=,etime=,command= | awk '/remote-debugging[-]port/ && !/--type=/' >&2 || true
+  exit 8
+fi
 
 UDD=$(mktemp -d)
 "$CHROME" --headless=new --remote-debugging-port=$CDP_PORT --user-data-dir=$UDD \

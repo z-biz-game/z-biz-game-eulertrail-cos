@@ -98,7 +98,10 @@ export function createView(canvas, { onEvent } = {}) {
   // hintRing 的 t = (now % 900) / 900 是一段纯装饰的呼吸：线宽从 3 长到 8、透明度从 0.9 淡到 0.3。
   // 减弱动效下**把 t 钉在 0.5**——环还在、还是那条被指的边、亮度还是能看清，只是不再一涨一落。
   // 提示环本身是"往这儿走"的信息载体，连环一起删掉等于把提示删了，所以只停它的相位。
-  let reduceMotion = false;
+  //
+  // 这里**不再声明第二个 reduceMotion**：上面那份（读 matchMedia 的系统偏好、并跟着 change 事件走）
+  // 才是活着的那一份；这份写死的 false 是并线时从旧版留下来的残骸，两份同名 let 撞在一起
+  // ⇒ SyntaxError ⇒ 整个模块不加载 ⇒ 一局都开不了。
   const ringPhase = () => (reduceMotion ? 0.5 : (performance.now() % 900) / 900);
 
   function measure() {
